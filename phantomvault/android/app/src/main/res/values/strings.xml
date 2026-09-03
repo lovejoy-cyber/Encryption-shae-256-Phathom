@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">PhantomVault</string>
+    <string name="title_activity_main">PhantomVault</string>
+    <string name="package_name">com.phantomvault.app</string>
+    <string name="custom_url_scheme">com.phantomvault.app</string>
+</resources>

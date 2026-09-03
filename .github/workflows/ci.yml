@@ -1,0 +1,164 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  crypto-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run lint --workspace=@phantomvault/crypto-core
+      - run: npx tsc --noEmit -p packages/crypto-core/tsconfig.json
+      - run: npm run test --workspace=@phantomvault/crypto-core
+
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_USER: phantomvault, POSTGRES_PASSWORD: phantomvault, POSTGRES_DB: phantomvault }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U phantomvault" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://phantomvault:phantomvault@localhost:5432/phantomvault
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run lint --workspace=@phantomvault/backend
+      - run: npx tsc --noEmit -p backend/tsconfig.json
+      - run: npm run db:migrate --workspace=@phantomvault/backend
+      - run: npm run test --workspace=@phantomvault/backend
+
+  ml-service:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_USER: phantomvault, POSTGRES_PASSWORD: phantomvault, POSTGRES_DB: phantomvault }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U phantomvault" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://phantomvault:phantomvault@localhost:5432/phantomvault
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: npm ci
+      - run: npm run db:migrate --workspace=@phantomvault/backend
+      - run: pip install -r ml-service/requirements.txt
+        working-directory: ml-service
+      - run: python -m pytest test/ -v
+        working-directory: ml-service
+
+  phantomvault-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: phantomvault/package-lock.json
+      - run: npm ci
+        working-directory: phantomvault
+      - run: npm run lint
+        working-directory: phantomvault
+      - run: npm run build
+        working-directory: phantomvault
+      - run: npm run test
+        working-directory: phantomvault
+
+  dast-zap-baseline:
+    runs-on: ubuntu-latest
+    needs: [backend]
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose up -d postgres redis minio api
+      - run: |
+          timeout 60 sh -c 'until curl -sf http://localhost:3000/health; do sleep 2; done'
+      # Passive baseline scan only (no active attack payloads) against the
+      # live API — report-only for now per docs/THREAT_MODEL.md §9 until
+      # findings are triaged; flip to failing the build once that's done.
+      - uses: zaproxy/action-baseline@v0.14.0
+        with:
+          target: 'http://localhost:3000'
+          cmd_options: '-a'
+          fail_action: false
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: npm ci
+      # Fails on any high/critical advisory in the JS dependency tree
+      # (the moderate-severity drizzle-kit/esbuild dev-tool advisory is a
+      # documented, accepted exception — see backend/package.json comments
+      # and docs/ARCHITECTURE.md; it never ships in the runtime image).
+      - run: npm audit --audit-level=high
+      - run: pip install pip-audit
+      - run: pip-audit -r ml-service/requirements.txt
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose build api ml-service
+
+  container-scan:
+    runs-on: ubuntu-latest
+    needs: docker-build
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose build api ml-service
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: cyber-security-api:latest
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: cyber-security-ml-service:latest
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sast-semgrep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/secrets
+            p/owasp-top-ten

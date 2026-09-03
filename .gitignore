@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+
+# Build output
+dist/
+dist-ssr/
+*.local
+
+# Env / secrets — never commit real values
+.env
+.env.*
+!.env.example
+
+# Test / tooling artifacts
+.pytest_cache/
+coverage/
+
+# Capacitor/Android native build artifacts (the android/ project skeleton itself is checked in)
+phantomvault/android/build/
+phantomvault/android/app/build/
+phantomvault/android/.gradle/
+phantomvault/android/local.properties
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
