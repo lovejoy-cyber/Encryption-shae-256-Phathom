@@ -33,7 +33,7 @@
     "zod": "^4.1.13"
   },
   "devDependencies": {
-    "@types/node": "^24.13.3",
+    "@types/node": "^26.4.0",
     "drizzle-kit": "^0.31.10",
     "nid-webauthn-emulator": "^0.2.15",
     "oxlint": "^1.79.0",
