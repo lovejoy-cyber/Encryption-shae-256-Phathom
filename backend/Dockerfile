@@ -5,7 +5,7 @@
 # is consumed as TS source directly (see its package.json `main`), the same way
 # every backend test in this repo already exercises it — one execution path,
 # not a compiled-JS path that diverges from what's actually been tested.
-FROM node:22-alpine AS base
+FROM node:26-alpine AS base
 WORKDIR /repo
 
 FROM base AS deps
